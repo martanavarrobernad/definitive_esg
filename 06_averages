@@ -73,9 +73,6 @@ def crear_averages_estrictos():
                             ep = mne.read_epochs(f, preload=True, verbose=False)
                             ep.event_id = {str(v): v for v in ep.event_id.values()}
                             
-                            if len(ep) > 130:
-                                ep = ep[25:]
-                            
                             keys_validas = [k for k in ep.event_id.keys() if int(k) in ids_s_d]
                             if keys_validas:
                                 epochs_list.append(ep[keys_validas])
