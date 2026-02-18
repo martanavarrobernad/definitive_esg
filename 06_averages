@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Feb 18 15:10:44 2026
+
+@author: marta.navarrobernad
+"""
+
+# -*- coding: utf-8 -*-
+import mne
+import os
+from pathlib import Path
+import gc
+
+#configuracion
+CLEAN_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/CLEAN_EPOCHS_BENCHMARK")
+BASE_AVE = CLEAN_DIR / "AVERAGES"
+
+FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
+REFS = ['AC', 'TH6']
+
+# mapeo de triggers
+# Estructura: TASK -> LEVEL -> S/D
+TRIGGER_MAP = {
+    'INATENTO': {
+        'LOCAL':  {'S': [165, 181, 117, 101], 'D': [125, 109, 173, 189]},
+        'GLOBAL': {'S': [165, 109, 173, 101], 'D': [125, 181, 117, 189]}
+    },
+    'ATENTO': {
+        'LOCAL':  {'S': [85, 149, 133, 69],   'D': [141, 77, 93, 157]},
+        'GLOBAL': {'S': [141, 77, 133, 69],   'D': [85, 149, 93, 157]}
+    }
+}
+
+RUNS_CONFIG = {
+    'INATENTO': ['run1', 'run2', 'run3', 'run4'],
+    'ATENTO':   ['run5', 'run6', 'run7', 'run8']
+}
+
+def crear_averages_dinamicos():
+    print(" Iniciando motor de Grand Averages con mapeo dinámico...")
+
+    for task, runs in RUNS_CONFIG.items():
+        for level in ['LOCAL', 'GLOBAL']:
+            
+            # Crear ruta: AVERAGES/INATENTO/LOCAL...
+            out_path = BASE_AVE / task / level
+            out_path.mkdir(parents=True, exist_ok=True)
+            
+            # Obtener los IDs de triggers 
+            ids_s = TRIGGER_MAP[task][level]['S']
+            ids_d = TRIGGER_MAP[task][level]['D']
+
+            for ref in REFS:
+                for f_name in FILTROS:
+                    print(f" {task} | {level} | {ref} | {f_name}")
+                    
+                    # 1. Buscar archivos
+                    all_files = list(CLEAN_DIR.glob(f"*{f_name}-epo.fif"))
+                    target_files = [f for f in all_files if any(r in f.name.lower() for r in runs) and ref in f.name.upper()]
+                    
+                    if not target_files: continue
+
+                    # 2. Cargar y normalizar
+                    epochs_list = []
+                    for f in target_files:
+                        try:
+                            ep = mne.read_epochs(f, preload=True, verbose=False)
+                            ep.event_id = {str(v): v for v in ep.event_id.values()}
+                            epochs_list.append(ep)
+                        except: continue
+
+                    if not epochs_list: continue
+
+                    # 3. Concatenar
+                    combined = mne.concatenate_epochs(epochs_list)
+                    
+                    # 4. Promediar usando los IDs dinámicos
+                    keys_s = [k for k in combined.event_id.keys() if int(k) in ids_s]
+                    keys_d = [k for k in combined.event_id.keys() if int(k) in ids_d]
+                    
+                    if keys_s and keys_d:
+                        ev_s = combined[keys_s].average()
+                        ev_d = combined[keys_d].average()
+                        
+                        # Guardar
+                        out_name = out_path / f"GA_{ref}_{f_name}-ave.fif"
+                        mne.write_evokeds(out_name, [ev_s, ev_d], overwrite=True, verbose=False)
+                        print(f"   Guardado: {out_name.name}")
+                    
+                    del combined, epochs_list; gc.collect()
+
+if __name__ == "__main__":
+    crear_averages_dinamicos()
+    print(f"\n Los promedios están organizados en {BASE_AVE}")
