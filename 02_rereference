@@ -1,0 +1,72 @@
+# -*- coding: utf-8 -*-
+"""
+PASO 2: RE-REFERENCIA DOBLE (TH6 y AC) + BIPOLAR ERB/AXILLA
+- Mantiene tu estructura original y CHANNELS_OF_INTEREST.
+- Añade el cálculo bipolar para Erb y Axila antes de la referencia global.
+"""
+
+from pathlib import Path
+import mne
+import gc
+
+# configuracion
+SUBJECT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg")
+
+CHANNELS_OF_INTEREST = [
+    'Iz', 'SC1', 'SC6', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 
+    'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19',
+    'ENG_AXILLA', 'ENG_AXILLA_REF', 'ENG_ERB', 'ENG_ERB_REF', 'AC', 'TH6'
+]
+
+REFERENCES = ['TH6', 'AC']
+
+def main():
+    run_files = sorted(list(SUBJECT_DIR.glob("*_NoStimArtifact.vhdr")))
+    
+    if not run_files:
+        print(f" No se encontraron archivos con el sufijo '_NoStimArtifact.vhdr' en: {SUBJECT_DIR}")
+        return
+
+    print(f" Encontrados {len(run_files)} archivos para re-referenciar.")
+
+    for f_path in run_files:
+        print(f"\n--- Procesando: {f_path.name} ---")
+        
+        for ref in REFERENCES:
+            raw = mne.io.read_raw_brainvision(f_path, preload=True, verbose=False)
+            
+            # Aseguramos tipos EEG
+            raw.set_channel_types({ch: 'eeg' for ch in raw.ch_names if ch in CHANNELS_OF_INTEREST})
+
+            # para erb y axilla no queremos re-referenciar a AC ni TH6, si no a su propio canal de referencia para crear un montaje bipolar 
+            # Esto evita que ERB y AXILLA se contaminen con TH6 o AC
+            if 'ENG_ERB' in raw.ch_names and 'ENG_ERB_REF' in raw.ch_names:
+                print("  -> Creando Erb Bipolar...")
+                mne.set_bipolar_reference(raw, anode=['ENG_ERB'], cathode=['ENG_ERB_REF'], 
+                                          ch_name=['ENG_ERB_BIP'], drop_refs=True, copy=False)
+            
+            if 'ENG_AXILLA' in raw.ch_names and 'ENG_AXILLA_REF' in raw.ch_names:
+                print("  -> Creando Axilla Bipolar...")
+                mne.set_bipolar_reference(raw, anode=['ENG_AXILLA'], cathode=['ENG_AXILLA_REF'], 
+                                          ch_name=['ENG_AXILLA_BIP'], drop_refs=True, copy=False)
+
+            # --- RE-REFERENCIA GLOBAL ---
+            if ref in raw.ch_names:
+                print(f"  -> Aplicando re-referencia a {ref}...")
+                # Importante: MNE no aplicará la referencia global a los canales bipolares 
+                # creados arriba porque ya tienen su propia referencia.
+                raw.set_eeg_reference(ref_channels=[ref], verbose=False)
+                
+                out_name = SUBJECT_DIR / f"{f_path.stem}_Ref{ref}.fif"
+                raw.save(out_name, overwrite=True, verbose=False)
+                print(f"  Guardado: {out_name.name}")
+            else:
+                print(f"  l canal {ref} no existe. Saltando...")
+            
+            del raw
+            gc.collect()
+
+    print("\n Done")
+
+if __name__ == "__main__":
+    main()
