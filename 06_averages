@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Wed Feb 18 15:10:44 2026
 
-@author: marta.navarrobernad
-"""
-
-# -*- coding: utf-8 -*-
 import mne
 import os
 from pathlib import Path
 import gc
 
-#configuracion
+# CONFIGURACION
 CLEAN_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/CLEAN_EPOCHS_BENCHMARK")
 BASE_AVE = CLEAN_DIR / "AVERAGES"
 
 FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
 REFS = ['AC', 'TH6']
 
-# mapeo de triggers
-# Estructura: TASK -> LEVEL -> S/D
 TRIGGER_MAP = {
     'INATENTO': {
         'LOCAL':  {'S': [165, 181, 117, 101], 'D': [125, 109, 173, 189]},
@@ -37,59 +29,69 @@ RUNS_CONFIG = {
     'ATENTO':   ['run5', 'run6', 'run7', 'run8']
 }
 
-def crear_averages_dinamicos():
-    print(" Iniciando motor de Grand Averages con mapeo dinámico...")
+def crear_averages_estrictos():
+    print("Iniciando promediado con filtrado estricto de referencia...")
+    
+    # Pillamos todos los .fif que no sean promedios previos
+    all_fifs = [f for f in CLEAN_DIR.glob("*.fif") if "GA_" not in f.name]
+    print(f"Total archivos base detectados: {len(all_fifs)}")
 
-    for task, runs in RUNS_CONFIG.items():
+    for task, runs_list in RUNS_CONFIG.items():
         for level in ['LOCAL', 'GLOBAL']:
-            
-            # Crear ruta: AVERAGES/INATENTO/LOCAL...
             out_path = BASE_AVE / task / level
             out_path.mkdir(parents=True, exist_ok=True)
             
-            # Obtener los IDs de triggers 
-            ids_s = TRIGGER_MAP[task][level]['S']
-            ids_d = TRIGGER_MAP[task][level]['D']
+            ids_s_d = TRIGGER_MAP[task][level]['S'] + TRIGGER_MAP[task][level]['D']
 
             for ref in REFS:
                 for f_name in FILTROS:
-                    print(f" {task} | {level} | {ref} | {f_name}")
+                    target_files = []
                     
-                    # 1. Buscar archivos
-                    all_files = list(CLEAN_DIR.glob(f"*{f_name}-epo.fif"))
-                    target_files = [f for f in all_files if any(r in f.name.lower() for r in runs) and ref in f.name.upper()]
+                    # Definimos la referencia "enemiga" para excluirla
+                    other_ref = 'TH6' if ref == 'AC' else 'AC'
                     
-                    if not target_files: continue
+                    for f in all_fifs:
+                        name_low = f.name.lower()
+                        
+                        # CONDICIONES ESTRICTAS
+                        es_filtro = f_name.lower() in name_low
+                        es_ref_correcta = f"ref{ref.lower()}" in name_low
+                        no_es_ref_falsa = f"ref{other_ref.lower()}" not in name_low
+                        es_run_tarea = any(r.lower() in name_low for r in runs_list)
+                        
+                        if es_filtro and es_ref_correcta and no_es_ref_falsa and es_run_tarea:
+                            target_files.append(f)
+                    
+                    if not target_files:
+                        continue
 
-                    # 2. Cargar y normalizar
+                    print(f"Procesando: {task} | {level} | {ref} | {f_name} ({len(target_files)} archivos)")
+                    
                     epochs_list = []
                     for f in target_files:
                         try:
                             ep = mne.read_epochs(f, preload=True, verbose=False)
                             ep.event_id = {str(v): v for v in ep.event_id.values()}
-                            epochs_list.append(ep)
-                        except: continue
+                            
+                            if len(ep) > 130:
+                                ep = ep[25:]
+                            
+                            keys_validas = [k for k in ep.event_id.keys() if int(k) in ids_s_d]
+                            if keys_validas:
+                                epochs_list.append(ep[keys_validas])
+                        except:
+                            continue
 
-                    if not epochs_list: continue
-
-                    # 3. Concatenar
-                    combined = mne.concatenate_epochs(epochs_list)
-                    
-                    # 4. Promediar usando los IDs dinámicos
-                    keys_s = [k for k in combined.event_id.keys() if int(k) in ids_s]
-                    keys_d = [k for k in combined.event_id.keys() if int(k) in ids_d]
-                    
-                    if keys_s and keys_d:
-                        ev_s = combined[keys_s].average()
-                        ev_d = combined[keys_d].average()
+                    if len(epochs_list) > 0:
+                        combined = mne.concatenate_epochs(epochs_list)
+                        evoked = combined.average()
                         
-                        # Guardar
                         out_name = out_path / f"GA_{ref}_{f_name}-ave.fif"
-                        mne.write_evokeds(out_name, [ev_s, ev_d], overwrite=True, verbose=False)
-                        print(f"   Guardado: {out_name.name}")
+                        evoked.save(out_name, overwrite=True, verbose=False)
+                        print(f"  OK: {out_name.name} | N={evoked.nave}")
                     
-                    del combined, epochs_list; gc.collect()
+                    del epochs_list
+                    gc.collect()
 
 if __name__ == "__main__":
-    crear_averages_dinamicos()
-    print(f"\n Los promedios están organizados en {BASE_AVE}")
+    crear_averages_estrictos()
