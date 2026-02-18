@@ -1,1 +1,4 @@
 deberia analizar todos los triggers? pero entonces por ejemplo el segundo, justo antes del ultimo, estaria completamente contaminado por la respuesta de este, ya que el intervalo es de 140 y pico ms, en el primero si que tendría un margen de unos 400 algo ms 
+
+
+revisar si limpieza por umbral esta eliminando epocas de esg basandose en axilla y erb 
