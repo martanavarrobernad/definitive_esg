@@ -1,0 +1,57 @@
+# -*- coding: utf-8 -*-
+import mne
+import os
+from pathlib import Path
+
+# configuracion
+INPUT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/ESG_CLEAN_OBS")
+EPOCHS_STAGE_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/EPOCHS_STAGING")
+EPOCHS_STAGE_DIR.mkdir(exist_ok=True, parents=True)
+
+# triggers, solo cogemos los terceros (ultimos)
+TRIGGER_MAP = {
+    165: 'INAT/3rd/LS/GS', 125: 'INAT/3rd/LD/GD', 109: 'INAT/3rd/LD/GS', 181: 'INAT/3rd/LS/GD',
+    173: 'INAT/3rd/LD/GS', 117: 'INAT/3rd/LS/GD', 101: 'INAT/3rd/LS/GS', 189: 'INAT/3rd/LD/GD',
+    141: 'ATT/3rd/LD/GS',  85:  'ATT/3rd/LS/GD',  77:  'ATT/3rd/LD/GS',  149: 'ATT/3rd/LS/GD',
+    133: 'ATT/3rd/LS/GS',  93:  'ATT/3rd/LD/GD',  69:  'ATT/3rd/LS/GS',  157: 'ATT/3rd/LD/GD'
+}
+
+def main():
+    files = sorted(list(INPUT_DIR.glob("*_OBS_Clean.fif")))
+    for f_path in files:
+        print(f" Procesando: {f_path.name}")
+        raw = mne.io.read_raw_fif(f_path, preload=True, verbose=False)
+        
+        # 1. Extraer eventos
+        events, ev_id = mne.events_from_annotations(raw, verbose=False)
+        
+        # --- LÓGICA DE HABITUACIÓN ---
+        # Como los triggers 1st, 2nd y 3rd van juntos, si queremos quitar los primeros 25 
+        # "ensayos" (bloques de 3 toques), tenemos que quitar los primeros 25*3 = 75 eventos.
+        events_no_hab = events[75:] # Saltamos los primeros 25 bloques (75 toques)
+        print(f" Descartados los primeros 75 triggers (25 bloques de habituación)")
+
+        # 2. Mapear etiquetas
+        new_id = {}
+        for annot_label, val in ev_id.items():
+            num = "".join(filter(str.isdigit, annot_label))
+            if num and int(num) in TRIGGER_MAP:
+                new_id[TRIGGER_MAP[int(num)]] = val
+        
+        if not new_id:
+            continue
+            
+        # 3. Epocar, -5ms a 800ms
+        # Usamos los eventos ya recortados
+        epochs = mne.Epochs(raw, events_no_hab, event_id=new_id, 
+                            tmin=-0.05, tmax=0.8, 
+                            baseline=(-0.02, -0.005), 
+                            preload=True, verbose=False)
+        
+        # Guardar
+        out_name = f_path.stem + "-epo.fif"
+        epochs.save(EPOCHS_STAGE_DIR / out_name, overwrite=True, verbose=False)
+        print(f"Guardadas {len(epochs)} épocas limpias de habituación.")
+
+if __name__ == "__main__":
+    main()
