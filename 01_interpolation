@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb 16 11:29:52 2026
+
+@author: marta.navarrobernad
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Optimized PCHIP Interpolation (Memory Efficient)
+- Uses float32 to reduce RAM usage by 50%.
+- Explicit memory clearing after each run.
+"""
+
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import mne
+import matplotlib.pyplot as plt
+from scipy.interpolate import PchipInterpolator
+import gc  # Garbage collector para liberar RAM
+
+# configuracion, los tiemps de artefacto de esg ya estaban calculados para el preprocesamiento de eeg, que ya se calculaba con los canales espinales
+# por tanto, cogemos el mismo csv
+SUBJECT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg")
+CFG_WIN_CSV = SUBJECT_DIR / "tiempos_artefacto_ESG_MULTICONS.csv"
+
+# Lista total de canales que deben estar limpios de artefacto
+CHANNELS_TO_CLEAN = [
+    "Iz", "SC1", "S3", "S4", "S5", "S6", "S7", "S8", "S9", 
+    "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "SC6", # Espinales
+    "TH6",                                                               # Referencia
+    "ENG_AXILLA", "ENG_AXILLA_REF", "ENG_ERB", "ENG_ERB_REF", "AC"      # Periféricos
+]
+
+# queremos mirar 5 puntos antes y 5 puntos despues del artefacto para restaurar la direccion de la señal
+N_PAD = 5 
+
+
+# funciones
+# pchip interpolation 
+def interpolate_stim_artifact(raw, onsets_sec, start_ms, end_ms, picks, n_pad=5):
+    sf = raw.info["sfreq"]
+    # Acceso directo a los datos para evitar copias
+    data = raw._data 
+    ch_indices = [raw.ch_names.index(ch) for ch in picks if ch in raw.ch_names]
+    
+    s0 = int(round(start_ms / 1000 * sf))
+    s1 = int(round(end_ms / 1000 * sf))
+    
+    for ons in onsets_sec:
+        idx_stim = int(round(ons * sf))
+        i0, i1 = idx_stim + s0, idx_stim + s1
+        
+        if i0 - n_pad < 0 or i1 + n_pad >= data.shape[1]:
+            continue
+
+        x_known = np.concatenate([np.arange(i0 - n_pad, i0), 
+                                  np.arange(i1 + 1, i1 + 1 + n_pad)])
+        x_interp = np.arange(i0, i1 + 1)
+
+        for ch in ch_indices:
+            y_known = data[ch, x_known]
+            f = PchipInterpolator(x_known, y_known)
+            data[ch, i0:i1 + 1] = f(x_interp)
+            
+# comparacion de artefacto antes y deespues de interpolar
+def plot_esg_comparison(t_ms, before_esg, after_esg, run_name):
+    plt.ioff()
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(t_ms, before_esg * 1e6, color='gray', alpha=0.5, label='Original ESG')
+    ax.plot(t_ms, after_esg * 1e6, color='blue', lw=1.5, label='Cleaned ESG (PCHIP)')
+    ax.set_title(f"Verification - {run_name}")
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Amplitude (µV)")
+    ax.legend()
+    note_text = "Note: EEG channels also interpolated with PCHIP."
+    plt.figtext(0.5, -0.05, note_text, ha="center", fontsize=10, bbox={"facecolor":"orange", "alpha":0.2})
+    
+    plt.savefig(SUBJECT_DIR / f"Cleaned_ESG_{run_name.replace('.vhdr','')}.png", dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+# proceso
+
+def main():
+    if not CFG_WIN_CSV.exists():
+        print(f"CSV not found: {CFG_WIN_CSV}")
+        return
+
+    df_win = pd.read_csv(CFG_WIN_CSV)
+    
+    for _, row in df_win.iterrows():
+        vhdr_path = SUBJECT_DIR / row['run']
+        if not vhdr_path.exists(): continue
+        
+        print(f"\n--- Processing: {vhdr_path.name} ---")
+        
+        # Paso 1: Cargar SIN pre-cargar datos (ahorra RAM inicial)
+        raw = mne.io.read_raw_brainvision(vhdr_path, preload=False, verbose=False)
+        
+        # Paso 2: Cargar datos forzando float32 (Reduce 50% de RAM)
+        print("  Loading data into RAM as float32...")
+        raw.load_data()
+        raw._data = raw._data.astype(np.float32) 
+        
+        # Identificar canales
+        ch_to_clean = [ch for ch in raw.ch_names if raw.get_channel_types()[raw.ch_names.index(ch)] not in ('stim', 'misc')]
+        esg_present = [ch for ch in CHANNELS_TO_CLEAN if ch in raw.ch_names]
+
+        # Extraer onsets para la limpieza
+        events, event_id = mne.events_from_annotations(raw, verbose=False)
+        stim_codes = [v for k, v in event_id.items() if "Stimulus/S" in k]
+        onsets = events[np.isin(events[:, 2], stim_codes)][:, 0] / raw.info["sfreq"]
+
+        # Promedio antes de limpiar
+        epochs = mne.Epochs(raw, events, event_id=None, tmin=-0.01, tmax=0.02, 
+                            picks=esg_present, baseline=None, preload=True, verbose=False)
+        before_avg = epochs.average().data.mean(axis=0)
+        t_ms = epochs.times * 1000
+
+        # Paso 3: Interpolar
+        print(f"  Interpolating {len(onsets)} stimuli...")
+        interpolate_stim_artifact(raw, onsets, row['start_ms'], row['end_ms'], ch_to_clean, N_PAD)
+
+        # Promedio después de limpiar
+        epochs_after = mne.Epochs(raw, events, event_id=None, tmin=-0.01, tmax=0.02, 
+                                  picks=esg_present, baseline=None, preload=True, verbose=False)
+        after_avg = epochs_after.average().data.mean(axis=0)
+
+        # Guardar imagen
+        plot_esg_comparison(t_ms, before_avg, after_avg, vhdr_path.name)
+        
+        # Paso 4: Exportar
+        out_vhdr = SUBJECT_DIR / f"{vhdr_path.stem}_NoStimArtifact.vhdr"
+        mne.export.export_raw(out_vhdr, raw, fmt="brainvision", overwrite=True)
+        
+        # Paso 5: LIBERAR MEMORIA
+        print("  Done. Clearing memory...")
+        del raw, epochs, epochs_after, before_avg, after_avg
+        gc.collect() # Llamada al recolector de basura
+
+    print("\nAll runs processed successfully.")
+
+if __name__ == "__main__":
+    main()
