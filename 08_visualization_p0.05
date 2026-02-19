@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Feb 19 12:36:27 2026
+
+@author: marta.navarrobernad
+"""
+
+import mne
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+from matplotlib.lines import Line2D
+
+# --- CONFIGURACIÓN ---
+BASE_PATH = "/home/marta.navarrobernad/Desktop/sub-P02/eeg/AVERAGES_DEF/averages_TH6"
+FILTROS = ["Nierula_Late", "Nierula_Otro", "Mehra", "Boehme"]
+ESTADO = "INATENTO"
+TIPOS = ["LOCAL", "GLOBAL"]
+
+# Umbral de significancia (0.05 o 0.01)
+P_THRESHOLD = 0.05 
+
+COLOR_STD = "#0000FF"
+COLOR_DEV = "#FF0000"
+COLOR_SIG = "#00FF00" # Verde para marcar la zona p-valor
+
+CH_INTERES = ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]
+
+def generar_comparativa_p_valor(tipo_referencia):
+    tmin_plot, tmax_plot = -0.010, 0.030
+    fig, axes = plt.subplots(len(FILTROS), 1, figsize=(12, 22), sharex=True)
+    
+    for i, filtro in enumerate(FILTROS):
+        file_path = os.path.join(BASE_PATH, ESTADO, tipo_referencia, f"Avg_{filtro}_TH6_{ESTADO}_{tipo_referencia}-ave.fif")
+        
+        if not os.path.exists(file_path):
+            axes[i].text(0.5, 0.5, f"No encontrado: {filtro}", ha='center')
+            continue
+        
+        evokeds = mne.read_evokeds(file_path, verbose=False)
+        std = evokeds[0].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
+        dev = evokeds[1].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
+        times = std.times * 1000 
+
+        # --- CÁLCULO ESTADÍSTICO (Z-Score -> P-Value) ---
+        # 1. Diferencia media de todos los canales seleccionados
+        diff_data = dev.get_data(picks=CH_INTERES) - std.get_data(picks=CH_INTERES)
+        diff_mean = np.mean(diff_data, axis=0)
+        
+        # 2. Estimación del ruido en la línea base (t < 0)
+        baseline_mask = (times <= 0)
+        mu = np.mean(diff_mean[baseline_mask])
+        sigma = np.std(diff_mean[baseline_mask]) + 1e-9 # Evitar división por cero
+        
+        # 3. Cálculo de Z-score y P-valor (two-tailed)
+        z_scores = (diff_mean - mu) / sigma
+        p_values = 2 * (1 - norm.cdf(np.abs(z_scores)))
+
+        # --- VISUALIZACIÓN ---
+        # Sombreado verde donde p < P_THRESHOLD
+        for t_idx in range(len(times)-1):
+            if p_values[t_idx] < P_THRESHOLD and times[t_idx] > 0:
+                axes[i].axvspan(times[t_idx], times[t_idx+1], color=COLOR_SIG, alpha=0.2)
+
+        # Dibujar canales Standard
+        for ch_idx, ch_name in enumerate(std.ch_names):
+            if ch_name in CH_INTERES:
+                axes[i].plot(times, std.data[ch_idx] * 1e6, 
+                             color=COLOR_STD, linestyle='--', linewidth=0.8, alpha=0.3)
+
+        # Dibujar canales Deviant
+        for ch_idx, ch_name in enumerate(dev.ch_names):
+            if ch_name in CH_INTERES:
+                axes[i].plot(times, dev.data[ch_idx] * 1e6, 
+                             color=COLOR_DEV, linestyle='-', linewidth=1.5, alpha=0.8)
+
+        # Estética
+        axes[i].set_title(f"FILTRO: {filtro.upper()}", loc='left', fontweight='bold', fontsize=10)
+        axes[i].axvline(0, color='black', linewidth=1)
+        axes[i].set_ylabel("µV")
+        
+        # Etiqueta de p-valor
+        axes[i].text(0.98, 0.05, f'p < {P_THRESHOLD}', transform=axes[i].transAxes, 
+                     ha='right', fontsize=8, color='green', fontweight='bold')
+
+    # Leyenda
+    custom_lines = [Line2D([0], [0], color=COLOR_STD, linestyle='--'),
+                    Line2D([0], [0], color=COLOR_DEV, linestyle='-'),
+                    Line2D([0], [0], color=COLOR_SIG, alpha=0.3, lw=6)]
+    axes[0].legend(custom_lines, ['Standard', 'Deviant', f'Significativo p<{P_THRESHOLD}'], loc='upper right')
+
+    axes[-1].set_xlabel("Tiempo (ms)")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+    plt.suptitle(f"SIGNIFICANCIA ESTADÍSTICA {tipo_referencia} - {ESTADO}", fontsize=14, fontweight='bold')
+    
+    return fig
+
+if __name__ == "__main__":
+    fig_l = generar_comparativa_p_valor("LOCAL")
+    fig_g = generar_comparativa_p_valor("GLOBAL")
+    plt.show()
