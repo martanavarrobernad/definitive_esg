@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Feb 19 11:47:13 2026
+
+@author: marta.navarrobernad
+"""
+
+import mne
+import os
+import matplotlib.pyplot as plt
+
+# --- CONFIGURACIÓN DE RUTAS ---
+BASE_PATH = "/home/marta.navarrobernad/Desktop/sub-P02/eeg/AVERAGES_DEF/averages_TH6"
+FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
+ESTADO = "INATENTO"
+TIPOS = ["LOCAL", "GLOBAL"]
+
+# Colores fijos para máxima claridad
+COLOR_STD = "#0000FF" # Azul puro
+COLOR_DEV = "#FF0000" # Rojo puro
+
+def generar_comparativa_bi_color(tipo_referencia):
+    tmin_plot, tmax_plot = -0.010, 0.030
+    fig, axes = plt.subplots(len(FILTROS), 1, figsize=(12, 22), sharex=True)
+    
+    for i, filtro in enumerate(FILTROS):
+        file_path = os.path.join(BASE_PATH, ESTADO, tipo_referencia, f"Avg_{filtro}_TH6_{ESTADO}_{tipo_referencia}-ave.fif")
+        
+        if not os.path.exists(file_path):
+            axes[i].text(0.5, 0.5, f"No encontrado: {filtro}", ha='center')
+            continue
+        
+        evokeds = mne.read_evokeds(file_path, verbose=False)
+        std = evokeds[0].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
+        dev = evokeds[1].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
+        times = std.times * 1000 
+
+        # 1. Pintar todos los canales del STANDARD en AZUL
+        for ch_idx, ch_name in enumerate(std.ch_names):
+            if ch_name in ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]:
+                axes[i].plot(times, std.data[ch_idx] * 1e6, 
+                             color=COLOR_STD, linestyle='--', linewidth=0.8, alpha=0.5)
+
+        # 2. Pintar todos los canales del DEVIANT en ROJO
+        for ch_idx, ch_name in enumerate(dev.ch_names):
+            if ch_name in ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]:
+                axes[i].plot(times, dev.data[ch_idx] * 1e6, 
+                             color=COLOR_DEV, linestyle='-', linewidth=1.5, alpha=0.8)
+
+        # Estética
+        axes[i].set_title(f"FILTRO: {filtro.upper()}", loc='left', fontweight='bold', fontsize=10)
+        axes[i].axvline(0, color='black', linestyle='-', linewidth=1) 
+        axes[i].set_ylabel("µV")
+
+    # Leyenda solo en el primer gráfico para no saturar
+    from matplotlib.lines import Line2D
+    custom_lines = [Line2D([0], [0], color=COLOR_STD, linestyle='--'),
+                    Line2D([0], [0], color=COLOR_DEV, linestyle='-')]
+    axes[0].legend(custom_lines, ['Standard (Azul)', 'Deviant (Rojo)'], loc='upper right')
+
+    axes[-1].set_xlabel("Tiempo (ms)")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+    plt.suptitle(f"COMPARATIVA {tipo_referencia} - AZUL (STD) vs ROJO (DEV)", fontsize=14, fontweight='bold')
+    
+    return fig
+
+if __name__ == "__main__":
+    fig_l = generar_comparativa_bi_color("LOCAL")
+    fig_g = generar_comparativa_bi_color("GLOBAL")
+    plt.show()
