@@ -1,18 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import mne
 import os
-from pathlib import Path
-import gc
+import glob
+import matplotlib.pyplot as plt
 
-# CONFIGURACION
-CLEAN_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/CLEAN_EPOCHS_BENCHMARK")
-BASE_AVE = CLEAN_DIR / "AVERAGES"
-
-FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
-REFS = ['AC', 'TH6']
-
+# Configuración de triggers
 TRIGGER_MAP = {
     'INATENTO': {
         'LOCAL':  {'S': [165, 181, 117, 101], 'D': [125, 109, 173, 189]},
@@ -24,71 +15,82 @@ TRIGGER_MAP = {
     }
 }
 
-RUNS_CONFIG = {
-    'INATENTO': ['run1', 'run2', 'run3', 'run4'],
-    'ATENTO':   ['run5', 'run6', 'run7', 'run8']
-}
+FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
+REFERENCIAS = ["AC", "TH6"]
+INPUT_PATH = "/home/marta.navarrobernad/Desktop/sub-P02/eeg/CLEAN_EPOCHS_BENCHMARK"
 
-def crear_averages_estrictos():
-    print("Iniciando promediado con filtrado estricto de referencia...")
-    
-    # Pillamos todos los .fif que no sean promedios previos
-    all_fifs = [f for f in CLEAN_DIR.glob("*.fif") if "GA_" not in f.name]
-    print(f"Total archivos base detectados: {len(all_fifs)}")
-
-    for task, runs_list in RUNS_CONFIG.items():
-        for level in ['LOCAL', 'GLOBAL']:
-            out_path = BASE_AVE / task / level
-            out_path.mkdir(parents=True, exist_ok=True)
-            
-            ids_s_d = TRIGGER_MAP[task][level]['S'] + TRIGGER_MAP[task][level]['D']
-
-            for ref in REFS:
-                for f_name in FILTROS:
-                    target_files = []
+def run_averaging_pipeline():
+    for ref in REFERENCIAS:
+        root_avg_dir = f"averages_{ref}"
+        
+        for filtro in FILTROS:
+            for estado in ['INATENTO', 'ATENTO']:
+                runs = range(1, 5) if estado == 'INATENTO' else range(5, 9)
+                all_epochs_list = []
+                
+                for r in runs:
+                    pattern = os.path.join(INPUT_PATH, f"*Run{r}*Ref{ref}*{filtro}*-epo.fif")
+                    files = glob.glob(pattern)
                     
-                    # Definimos la referencia "enemiga" para excluirla
-                    other_ref = 'TH6' if ref == 'AC' else 'AC'
+                    if files:
+                        epochs = mne.read_epochs(files[0], preload=True)
+                        # Reset de event_id para evitar conflictos de nombres
+                        new_event_id = {str(val): val for val in epochs.events[:, 2]}
+                        epochs.event_id = new_event_id
+                        all_epochs_list.append(epochs)
+                
+                if not all_epochs_list:
+                    continue
+                
+                combined_epochs = mne.concatenate_epochs(all_epochs_list)
+                
+                for tipo in ['LOCAL', 'GLOBAL']:
+                    target_dir = os.path.join(root_avg_dir, estado, tipo)
+                    os.makedirs(target_dir, exist_ok=True)
                     
-                    for f in all_fifs:
-                        name_low = f.name.lower()
+                    ids_s = [str(i) for i in TRIGGER_MAP[estado][tipo]['S']]
+                    ids_d = [str(i) for i in TRIGGER_MAP[estado][tipo]['D']]
+                    
+                    present_ids = combined_epochs.event_id.keys()
+                    valid_s = [i for i in ids_s if i in present_ids]
+                    valid_d = [i for i in ids_d if i in present_ids]
+                    
+                    evokeds_dict = {}
+                    if valid_s:
+                        ev_s = combined_epochs[valid_s].average()
+                        ev_s.comment = 'Standard'
+                        evokeds_dict['Standard'] = ev_s
                         
-                        # CONDICIONES ESTRICTAS
-                        es_filtro = f_name.lower() in name_low
-                        es_ref_correcta = f"ref{ref.lower()}" in name_low
-                        no_es_ref_falsa = f"ref{other_ref.lower()}" not in name_low
-                        es_run_tarea = any(r.lower() in name_low for r in runs_list)
+                    if valid_d:
+                        ev_d = combined_epochs[valid_d].average()
+                        ev_d.comment = 'Deviant'
+                        evokeds_dict['Deviant'] = ev_d
+                    
+                    if evokeds_dict:
+                        # 1. Guardar archivo .fif
+                        output_filename = f"Avg_{filtro}_{ref}_{estado}_{tipo}"
+                        output_path_fif = os.path.join(target_dir, f"{output_filename}-ave.fif")
+                        mne.write_evokeds(output_path_fif, list(evokeds_dict.values()), overwrite=True)
                         
-                        if es_filtro and es_ref_correcta and no_es_ref_falsa and es_run_tarea:
-                            target_files.append(f)
-                    
-                    if not target_files:
-                        continue
-
-                    print(f"Procesando: {task} | {level} | {ref} | {f_name} ({len(target_files)} archivos)")
-                    
-                    epochs_list = []
-                    for f in target_files:
+                        # 2. Generar y guardar gráfico comparativo (Butterfly plot + GFP)
                         try:
-                            ep = mne.read_epochs(f, preload=True, verbose=False)
-                            ep.event_id = {str(v): v for v in ep.event_id.values()}
+                            fig = mne.viz.plot_compare_evokeds(
+                                evokeds_dict, 
+                                picks='eeg', 
+                                title=f"{filtro} {ref} {estado} {tipo}",
+                                show=False
+                            )
+                            # plot_compare_evokeds devuelve una lista de figuras
+                            if isinstance(fig, list):
+                                fig = fig[0]
                             
-                            keys_validas = [k for k in ep.event_id.keys() if int(k) in ids_s_d]
-                            if keys_validas:
-                                epochs_list.append(ep[keys_validas])
-                        except:
-                            continue
+                            output_path_png = os.path.join(target_dir, f"{output_filename}.png")
+                            fig.savefig(output_path_png)
+                            plt.close(fig) # Liberar memoria
+                        except Exception as e:
+                            print(f"No se pudo generar el gráfico para {output_filename}: {e}")
 
-                    if len(epochs_list) > 0:
-                        combined = mne.concatenate_epochs(epochs_list)
-                        evoked = combined.average()
-                        
-                        out_name = out_path / f"GA_{ref}_{f_name}-ave.fif"
-                        evoked.save(out_name, overwrite=True, verbose=False)
-                        print(f"  OK: {out_name.name} | N={evoked.nave}")
-                    
-                    del epochs_list
-                    gc.collect()
+                        print(f"Procesado: {output_filename}")
 
 if __name__ == "__main__":
-    crear_averages_estrictos()
+    run_averaging_pipeline()
