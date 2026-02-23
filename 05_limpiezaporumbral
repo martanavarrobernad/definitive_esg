@@ -31,8 +31,8 @@ REPORT_DIR.mkdir(exist_ok=True, parents=True)
 # ignoraremos los canales de referencia para no drop epochs por culpa de estos
 CH_ESG_BASE = ['Iz', 'SC1', 'SC6', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 
                'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19']
-CH_ERB = ['ENG_ERB_BIP']
-CH_AXI = ['ENG_AXILLA_BIP']
+CH_ERB = ['ENG_ERB']
+CH_AXI = ['ENG_AXILLA']
 CH_REFS = ['AC', 'TH6']
 
 # definir los filtros, haremos una limpieza por umbral para cada filtro por separado
@@ -127,11 +127,11 @@ def main():
         df_summary = pd.DataFrame(cleaning_summary)
         csv_name = REPORT_DIR / f"Cleaning_Stats_{f_path.stem}.csv"
         df_summary.to_csv(csv_name, index=False)
-        print(f" CSV GUARDADO: {csv_name.name}")
+        print(f"📊 CSV GUARDADO: {csv_name.name}")
         
         del epochs_orig; gc.collect()
 
-    print("\n LIMPIEZA COMPLETADA SIN REPORTS PESADOS")
+    print("\n✅ LIMPIEZA COMPLETADA SIN REPORTS PESADOS")
     
 if __name__ == "__main__":
     main()
