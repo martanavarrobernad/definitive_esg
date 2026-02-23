@@ -2,14 +2,22 @@
 # -*- coding: utf-8 -*-
 import mne
 import os
+import numpy as np
 from pathlib import Path
 
-# configuracion
+# CONFIGURACIÓN
 INPUT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/ESG_CLEAN_OBS")
 EPOCHS_STAGE_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/EPOCHS_STAGING")
 EPOCHS_STAGE_DIR.mkdir(exist_ok=True, parents=True)
 
-# 1. MAPA CORREGIDO (Números sin comillas)
+# --- ETIQUETADO JERÁRQUICO MAESTRO ---
+EVENT_ID = {
+    'Attentive/LS/GS': 10, 'Attentive/LS/GD': 11, 
+    'Attentive/LD/GS': 12, 'Attentive/LD/GD': 13,
+    'Inattentive/LS/GS': 20, 'Inattentive/LS/GD': 21, 
+    'Inattentive/LD/GS': 22, 'Inattentive/LD/GD': 23
+}
+
 TRIGGER_MAP = {
     69:  'Attentive/LS/GS', 133: 'Attentive/LS/GS',
     149: 'Attentive/LS/GD', 85:  'Attentive/LS/GD',
@@ -33,35 +41,51 @@ def main():
         raw = mne.io.read_raw_fif(f_path, preload=True, verbose=False)
         
         events, ev_id = mne.events_from_annotations(raw, verbose=False)
-        events_no_hab = events[75:] 
         
-        # 2. Mapear etiquetas con depuración
-        new_id = {}
-        for annot_label, val in ev_id.items():
-            num_str = "".join(filter(str.isdigit, annot_label))
+        # 1. Mapeo inverso de anotaciones para saber qué número corresponde a qué valor interno
+        # ev_id tiene {'Stimulus/S 69': 1, ...}
+        val_to_trigger = {}
+        for annot, val in ev_id.items():
+            num_str = "".join(filter(str.isdigit, annot))
             if num_str:
-                num_int = int(num_str)
-                if num_int in TRIGGER_MAP:
-                    new_id[TRIGGER_MAP[num_int]] = val
-        
-        if not new_id:
-            print(f"  ERROR: No se encontraron triggers del mapa en este archivo.")
-            print(f"   Triggers encontrados en el archivo: {list(ev_id.keys())}")
+                val_to_trigger[val] = int(num_str)
+
+        # 2. CREACIÓN DE NUEVOS EVENTOS (Adjudicación de IDs del 10 al 23)
+        # Filtramos habituación y transformamos IDs simultáneamente
+        clean_events = []
+        # Empezamos después de los 75 de habituación
+        events_no_hab = events[75:] 
+
+        for ev in events_no_hab:
+            orig_val = ev[2]
+            if orig_val in val_to_trigger:
+                trigger_num = val_to_trigger[orig_val]
+                if trigger_num in TRIGGER_MAP:
+                    label = TRIGGER_MAP[trigger_num]
+                    new_id = EVENT_ID[label]
+                    # Guardamos el evento con el ID maestro (10-23)
+                    clean_events.append([ev[0], 0, new_id])
+
+        if not clean_events:
+            print(f"  ERROR: No se generaron eventos válidos para este archivo.")
             continue
-            
-        # 3. Crear épocas
-        epochs = mne.Epochs(raw, events_no_hab, event_id=new_id, 
+
+        new_events_array = np.array(clean_events)
+
+        # 3. CREAR ÉPOCAS
+        # Ahora usamos EVENT_ID (el maestro) y new_events_array (que ya tiene los 10, 11...)
+        epochs = mne.Epochs(raw, new_events_array, event_id=EVENT_ID, 
                             tmin=-0.8, tmax=0.8, 
                             baseline=(-0.8, 0.0), 
-                            preload=True, verbose=False)
+                            preload=True, verbose=False,
+                            on_missing='ignore') # Ignora si en un Run falta una condición
         
-        # 4. Guardar y avisar
+        # 4. Guardar
         out_name = f_path.stem + "-epo.fif"
         save_path = EPOCHS_STAGE_DIR / out_name
         epochs.save(save_path, overwrite=True, verbose=False)
         
         print(f" GUARDADO EXITOSO")
-        print(f" RUTA: {save_path}")
         print(f" ÉPOCAS GENERADAS: {len(epochs)}")
 
 if __name__ == "__main__":
