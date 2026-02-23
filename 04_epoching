@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb 23 12:00:27 2026
+
+@author: marta.navarrobernad
+"""
+
 # -*- coding: utf-8 -*-
 import mne
 import os
@@ -10,10 +18,14 @@ EPOCHS_STAGE_DIR.mkdir(exist_ok=True, parents=True)
 
 # triggers, solo cogemos los terceros (ultimos)
 TRIGGER_MAP = {
-    165: 'INAT/3rd/LS/GS', 125: 'INAT/3rd/LD/GD', 109: 'INAT/3rd/LD/GS', 181: 'INAT/3rd/LS/GD',
-    173: 'INAT/3rd/LD/GS', 117: 'INAT/3rd/LS/GD', 101: 'INAT/3rd/LS/GS', 189: 'INAT/3rd/LD/GD',
-    141: 'ATT/3rd/LD/GS',  85:  'ATT/3rd/LS/GD',  77:  'ATT/3rd/LD/GS',  149: 'ATT/3rd/LS/GD',
-    133: 'ATT/3rd/LS/GS',  93:  'ATT/3rd/LD/GD',  69:  'ATT/3rd/LS/GS',  157: 'ATT/3rd/LD/GD'
+    '69':  'Attentive/LS/GS', '133': 'Attentive/LS/GS',
+    '149': 'Attentive/LS/GD', '85':  'Attentive/LS/GD',
+    '141': 'Attentive/LD/GS', '77':  'Attentive/LD/GS',
+    '157': 'Attentive/LD/GD', '93':  'Attentive/LD/GD',
+    '101': 'Inattentive/LS/GS', '165': 'Inattentive/LS/GS', 
+    '181': 'Inattentive/LS/GD', '117': 'Inattentive/LS/GD', 
+    '173': 'Inattentive/LD/GS', '109': 'Inattentive/LD/GS', 
+    '189': 'Inattentive/LD/GD', '125': 'Inattentive/LD/GD'
 }
 
 def main():
@@ -41,11 +53,11 @@ def main():
         if not new_id:
             continue
             
-        # 3. Epocar, -5ms a 800ms
+        # 3. Epocar,
         # Usamos los eventos ya recortados
         epochs = mne.Epochs(raw, events_no_hab, event_id=new_id, 
-                            tmin=-0.05, tmax=0.8, 
-                            baseline=(-0.02, -0.005), 
+                            tmin=-0.8, tmax=0.8, 
+                            baseline=(-0.8, 0.0), 
                             preload=True, verbose=False)
         
         # Guardar
