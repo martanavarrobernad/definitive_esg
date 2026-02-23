@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Created on Mon Feb 23 12:40:55 2026
+
+@author: marta.navarrobernad
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
 Created on Mon Feb 23 12:00:27 2026
 
 @author: marta.navarrobernad
@@ -16,54 +24,60 @@ INPUT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/ESG_CLEAN_OBS")
 EPOCHS_STAGE_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/EPOCHS_STAGING")
 EPOCHS_STAGE_DIR.mkdir(exist_ok=True, parents=True)
 
-# triggers, solo cogemos los terceros (ultimos)
+# 1. MAPA CORREGIDO (Números sin comillas)
 TRIGGER_MAP = {
-    '69':  'Attentive/LS/GS', '133': 'Attentive/LS/GS',
-    '149': 'Attentive/LS/GD', '85':  'Attentive/LS/GD',
-    '141': 'Attentive/LD/GS', '77':  'Attentive/LD/GS',
-    '157': 'Attentive/LD/GD', '93':  'Attentive/LD/GD',
-    '101': 'Inattentive/LS/GS', '165': 'Inattentive/LS/GS', 
-    '181': 'Inattentive/LS/GD', '117': 'Inattentive/LS/GD', 
-    '173': 'Inattentive/LD/GS', '109': 'Inattentive/LD/GS', 
-    '189': 'Inattentive/LD/GD', '125': 'Inattentive/LD/GD'
+    69:  'Attentive/LS/GS', 133: 'Attentive/LS/GS',
+    149: 'Attentive/LS/GD', 85:  'Attentive/LS/GD',
+    141: 'Attentive/LD/GS', 77:  'Attentive/LD/GS',
+    157: 'Attentive/LD/GD', 93:  'Attentive/LD/GD',
+    101: 'Inattentive/LS/GS', 165: 'Inattentive/LS/GS', 
+    181: 'Inattentive/LS/GD', 117: 'Inattentive/LS/GD', 
+    173: 'Inattentive/LD/GS', 109: 'Inattentive/LD/GS', 
+    189: 'Inattentive/LD/GD', 125: 'Inattentive/LD/GD'
 }
 
 def main():
     files = sorted(list(INPUT_DIR.glob("*_OBS_Clean.fif")))
+    
+    if not files:
+        print(f" No se encontraron archivos en {INPUT_DIR}")
+        return
+
     for f_path in files:
-        print(f" Procesando: {f_path.name}")
+        print(f"\n PROCESANDO: {f_path.name}")
         raw = mne.io.read_raw_fif(f_path, preload=True, verbose=False)
         
-        # 1. Extraer eventos
         events, ev_id = mne.events_from_annotations(raw, verbose=False)
+        events_no_hab = events[75:] 
         
-        # --- LÓGICA DE HABITUACIÓN ---
-        # Como los triggers 1st, 2nd y 3rd van juntos, si queremos quitar los primeros 25 
-        # "ensayos" (bloques de 3 toques), tenemos que quitar los primeros 25*3 = 75 eventos.
-        events_no_hab = events[75:] # Saltamos los primeros 25 bloques (75 toques)
-        print(f" Descartados los primeros 75 triggers (25 bloques de habituación)")
-
-        # 2. Mapear etiquetas
+        # 2. Mapear etiquetas con depuración
         new_id = {}
         for annot_label, val in ev_id.items():
-            num = "".join(filter(str.isdigit, annot_label))
-            if num and int(num) in TRIGGER_MAP:
-                new_id[TRIGGER_MAP[int(num)]] = val
+            num_str = "".join(filter(str.isdigit, annot_label))
+            if num_str:
+                num_int = int(num_str)
+                if num_int in TRIGGER_MAP:
+                    new_id[TRIGGER_MAP[num_int]] = val
         
         if not new_id:
+            print(f"  ERROR: No se encontraron triggers del mapa en este archivo.")
+            print(f"   Triggers encontrados en el archivo: {list(ev_id.keys())}")
             continue
             
-        # 3. Epocar,
-        # Usamos los eventos ya recortados
+        # 3. Crear épocas
         epochs = mne.Epochs(raw, events_no_hab, event_id=new_id, 
                             tmin=-0.8, tmax=0.8, 
                             baseline=(-0.8, 0.0), 
                             preload=True, verbose=False)
         
-        # Guardar
+        # 4. Guardar y avisar
         out_name = f_path.stem + "-epo.fif"
-        epochs.save(EPOCHS_STAGE_DIR / out_name, overwrite=True, verbose=False)
-        print(f"Guardadas {len(epochs)} épocas limpias de habituación.")
+        save_path = EPOCHS_STAGE_DIR / out_name
+        epochs.save(save_path, overwrite=True, verbose=False)
+        
+        print(f" GUARDADO EXITOSO")
+        print(f" RUTA: {save_path}")
+        print(f" ÉPOCAS GENERADAS: {len(epochs)}")
 
 if __name__ == "__main__":
     main()
