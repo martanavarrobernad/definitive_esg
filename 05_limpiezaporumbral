@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb 23 12:41:21 2026
+
+@author: marta.navarrobernad
+"""
+
 # -*- coding: utf-8 -*-
 # calcula umbrales adpatativos para el rechazo de epocas en base a los diferentesa filtros que aplicamos, es decir,
 # 1. Filtra, 2.Calcula umbrales, por lo tanto el rechgazo de epochs sera adaptado a cada filtro
@@ -49,20 +57,22 @@ def get_thr(epochs, ch_type, minimum):
     return max(np.percentile(p2ps, 98), minimum)
 
 def main():
+    import pandas as pd
+    from collections import Counter
+    
     files = sorted(list(INPUT_DIR.glob("*-epo.fif")))
     filters = get_filter_defs()
     
     for f_path in files:
         print(f"\n Procesando archivo: {f_path.name}")
-        # Cargamos épocas segmentadas (-0.05 a 0.8s) y sin habituación
         epochs_orig = mne.read_epochs(f_path, preload=True, verbose=False)
+        cleaning_summary = []
 
         for f_name, p in filters.items():
             print(f" Aplicando Filtro: {f_name}")
-            report = mne.Report(title=f"Limpieza {f_path.stem} - {f_name}")
             ep_filt = epochs_orig.copy()
             
-            # 1. FILTRADO ESPECÍFICO
+            # 1. FILTRADO
             if p["type"] == "iir":
                 ep_filt.filter(p["l"], p["h"], method='iir', 
                                iir_params=dict(order=p["order"], ftype='butter'), 
@@ -71,45 +81,57 @@ def main():
                 ep_filt.filter(p["l"], p["h"], method='fir', phase='zero', 
                                filter_length=p["len"], fir_design='firwin', verbose=False)
             elif p["type"] == "iir_mixed":
-                # Lógica específica para Wimmer
                 ep_filt.filter(0.5, 60, method='iir', 
                                iir_params=dict(order=3, ftype='butter'), 
                                phase='zero', verbose=False)
 
-            # 2. CONFIGURACIÓN DE CANALES PARA UMBRALES
-            # Resetear todo a misc para que no cuente en el rechazo por defecto
+            # 2. CONFIGURACIÓN DE CANALES
             ep_filt.set_channel_types({ch: 'misc' for ch in ep_filt.ch_names}, verbose=False)
-            
-            # Reactivar tipos según tus listas para el drop_bad, los etiquetamos como eeg emg y eog para que MNE los reconozca como diferentes 
             for ch in CH_ESG_BASE:
                 if ch in ep_filt.ch_names: ep_filt.set_channel_types({ch: 'eeg'}, verbose=False)
             if CH_ERB[0] in ep_filt.ch_names: ep_filt.set_channel_types({CH_ERB[0]: 'emg'}, verbose=False)
             if CH_AXI[0] in ep_filt.ch_names: ep_filt.set_channel_types({CH_AXI[0]: 'eog'}, verbose=False)
-            # 3. CÁLCULO DE UMBRALES ADAPTATIVOS SOBRE SEÑAL FILTRADA
-            #calculamos un umbral diferente para cada uno, los valores 100,250 y 400 son limites de confianza, no limpiar por debajo de ese valor 
-            #trial and error + biblografia
+
+            # 3. UMBRALES Y RECHAZO
             t_esg = get_thr(ep_filt, 'eeg', 100)
             t_erb = get_thr(ep_filt, 'emg', 250)
             t_axi = get_thr(ep_filt, 'eog', 400)
 
-            # 4. RECHAZO (DROP BAD)
-            # Ignoramos referencias (CH_REFS) ya que están como 'misc'
+            n_before = len(ep_filt)
             ep_filt.drop_bad(reject={'eeg': t_esg*1e-6, 'emg': t_erb*1e-6, 'eog': t_axi*1e-6}, verbose=False)
+            n_after = len(ep_filt)
+            
+            # 4. LOG DE CANALES RUIDOSOS
+            drop_reasons = [ch for log in ep_filt.drop_log if log for ch in log]
+            counts = Counter(drop_reasons)
+            top_3_str = "; ".join([f"{ch}({n})" for ch, n in counts.most_common(3)])
 
-            # 5. GUARDAR ÉPOCAS LIMPIAS (Para ver componentes tardíos después)
+            cleaning_summary.append({
+                "filter_name": f_name,
+                "total": n_before,
+                "remaining": n_after,
+                "rejected": n_before - n_after,
+                "perc_rejected": round(((n_before - n_after) / n_before) * 100, 2),
+                "thr_esg": round(t_esg, 2),
+                "top_culprits": top_3_str
+            })
+
+            # 5. GUARDAR FIF
             out_name = OUT_DIR / f"Clean_Epochs_{f_path.stem}_{f_name}-epo.fif"
             ep_filt.save(out_name, overwrite=True, verbose=False)
-            # Añadimos las épocas al reporte (las estadísticas se generan solas)
-            report.add_epochs(epochs=ep_filt, title=f'Resultados {f_name}')
-            report_path = REPORT_DIR / f"Report_{f_path.stem}_{f_name}.html"
-            report.save(report_path, overwrite=True, open_browser=False, verbose=False)
             
-            print(f"      Filtro {f_name}: {len(ep_filt)} épocas restantes. Thr ESG: {t_esg:.1f}µV")
+            print(f"      {f_name}: {n_after} epos. Top ruidosos: {top_3_str}")
+            del ep_filt; gc.collect()
 
-            del ep_filt, report; gc.collect()
+        # GUARDAR CSV AL FINALIZAR LOS FILTROS DE ESTE ARCHIVO
+        df_summary = pd.DataFrame(cleaning_summary)
+        csv_name = REPORT_DIR / f"Cleaning_Stats_{f_path.stem}.csv"
+        df_summary.to_csv(csv_name, index=False)
+        print(f" CSV GUARDADO: {csv_name.name}")
+        
         del epochs_orig; gc.collect()
 
-    print("\n limpieza completada")
-
+    print("\n LIMPIEZA COMPLETADA SIN REPORTS PESADOS")
+    
 if __name__ == "__main__":
     main()
