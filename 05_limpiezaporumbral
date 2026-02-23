@@ -127,11 +127,11 @@ def main():
         df_summary = pd.DataFrame(cleaning_summary)
         csv_name = REPORT_DIR / f"Cleaning_Stats_{f_path.stem}.csv"
         df_summary.to_csv(csv_name, index=False)
-        print(f"📊 CSV GUARDADO: {csv_name.name}")
+        print(f"CSV GUARDADO: {csv_name.name}")
         
         del epochs_orig; gc.collect()
 
-    print("\n✅ LIMPIEZA COMPLETADA SIN REPORTS PESADOS")
+    print("\nLIMPIEZA COMPLETADA SIN REPORTS PESADOS")
     
 if __name__ == "__main__":
     main()
