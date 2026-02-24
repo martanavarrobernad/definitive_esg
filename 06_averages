@@ -1,22 +1,31 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Feb 24 13:49:32 2026
+
+@author: marta.navarrobernad
+"""
+
 import mne
 import os
 import glob
 import matplotlib.pyplot as plt
 
-# Configuración de triggers
+# Trigger config
+# S = Standard, D = Deviant
 TRIGGER_MAP = {
     'INATENTO': {
-        'LOCAL':  {'S': [165, 181, 117, 101], 'D': [125, 109, 173, 189]},
-        'GLOBAL': {'S': [165, 109, 173, 101], 'D': [125, 181, 117, 189]}
+        'LOCAL':  {'S': [20, 21], 'D': [22, 23]},
+        'GLOBAL': {'S': [20, 22], 'D': [21, 23]}
     },
     'ATENTO': {
-        'LOCAL':  {'S': [85, 149, 133, 69],   'D': [141, 77, 93, 157]},
-        'GLOBAL': {'S': [141, 77, 133, 69],   'D': [85, 149, 93, 157]}
+        'LOCAL':  {'S': [10, 11], 'D': [12, 13]},
+        'GLOBAL': {'S': [10, 12], 'D': [11, 13]}
     }
 }
 
-FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
-REFERENCIAS = ["AC", "TH6"]
+FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"] #filters
+REFERENCIAS = ["TH6"]  #ref, we can either put TH6 or AC depending on what we want to see
 INPUT_PATH = "/home/marta.navarrobernad/Desktop/sub-P02/eeg/CLEAN_EPOCHS_BENCHMARK"
 
 def run_averaging_pipeline():
@@ -25,16 +34,18 @@ def run_averaging_pipeline():
         
         for filtro in FILTROS:
             for estado in ['INATENTO', 'ATENTO']:
+                # Define attentive or inattentive, the first 4 runs were inattentive 
                 runs = range(1, 5) if estado == 'INATENTO' else range(5, 9)
                 all_epochs_list = []
                 
                 for r in runs:
-                    pattern = os.path.join(INPUT_PATH, f"*Run{r}*Ref{ref}*{filtro}*-epo.fif")
+                    # Search last outputs
+                    pattern = os.path.join(INPUT_PATH, f"Clean_Epochs_*Run{r}*Ref{ref}*{filtro}*-epo.fif")
                     files = glob.glob(pattern)
                     
                     if files:
-                        epochs = mne.read_epochs(files[0], preload=True)
-                        # Reset de event_id para evitar conflictos de nombres
+                        epochs = mne.read_epochs(files[0], preload=True, verbose=False)
+                        # events id
                         new_event_id = {str(val): val for val in epochs.events[:, 2]}
                         epochs.event_id = new_event_id
                         all_epochs_list.append(epochs)
@@ -42,12 +53,14 @@ def run_averaging_pipeline():
                 if not all_epochs_list:
                     continue
                 
-                combined_epochs = mne.concatenate_epochs(all_epochs_list)
+                # Concatenate for runs for condition attentive and other for for inattentive
+                combined_epochs = mne.concatenate_epochs(all_epochs_list, verbose=False)
                 
                 for tipo in ['LOCAL', 'GLOBAL']:
                     target_dir = os.path.join(root_avg_dir, estado, tipo)
                     os.makedirs(target_dir, exist_ok=True)
                     
+                    # Extract IDs
                     ids_s = [str(i) for i in TRIGGER_MAP[estado][tipo]['S']]
                     ids_d = [str(i) for i in TRIGGER_MAP[estado][tipo]['D']]
                     
@@ -67,12 +80,12 @@ def run_averaging_pipeline():
                         evokeds_dict['Deviant'] = ev_d
                     
                     if evokeds_dict:
-                        # 1. Guardar archivo .fif
+                        # 1. Save
                         output_filename = f"Avg_{filtro}_{ref}_{estado}_{tipo}"
                         output_path_fif = os.path.join(target_dir, f"{output_filename}-ave.fif")
-                        mne.write_evokeds(output_path_fif, list(evokeds_dict.values()), overwrite=True)
+                        mne.write_evokeds(output_path_fif, list(evokeds_dict.values()), overwrite=True, verbose=False)
                         
-                        # 2. Generar y guardar gráfico comparativo (Butterfly plot + GFP)
+                        # 2. Comparision graphic
                         try:
                             fig = mne.viz.plot_compare_evokeds(
                                 evokeds_dict, 
@@ -80,13 +93,12 @@ def run_averaging_pipeline():
                                 title=f"{filtro} {ref} {estado} {tipo}",
                                 show=False
                             )
-                            # plot_compare_evokeds devuelve una lista de figuras
                             if isinstance(fig, list):
                                 fig = fig[0]
                             
                             output_path_png = os.path.join(target_dir, f"{output_filename}.png")
                             fig.savefig(output_path_png)
-                            plt.close(fig) # Liberar memoria
+                            plt.close(fig)
                         except Exception as e:
                             print(f"No se pudo generar el gráfico para {output_filename}: {e}")
 
