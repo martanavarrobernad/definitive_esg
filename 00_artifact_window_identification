@@ -1,0 +1,191 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Feb 3 15:26:39 2026
+@author: navar
+
+Interactive selection of artifact window for Cervical ESG.
+- Uses ESG channels for averaging.
+- Manual selection per Run (8 runs).
+-  results export in csv
+"""
+
+from pathlib import Path
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mne
+import glob
+
+# ---------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------
+SUBJECT_DIR = Path(r"C:\Users\navar\Desktop\eeg\eeg")
+OUT_CSV = SUBJECT_DIR / "tiempos_artefacto_ESG_MULTICONS.csv"
+
+# ESG cervical channels (RESTORED)
+ESG_CERV = [
+    "Iz", "SC1", "S3", "S4", "S5", "S6", "S7", "S8", "S9",
+    "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19",
+    "SC6",
+]
+
+# Time window for inspection (ms)
+EPOCH_VIEW_MS = (-10.0, 10.0)
+
+# Complete Trigger Lists (Inattentive & Attentive) TRIG_IZQ are the triggers on the left side and TRIG_DER are the triggers on the right side
+TRIG_IZQ = [109, 125, 101, 117, 105, 108, 113, 116, 97, 100, 121, 124, 73, 76, 81, 84, 85, 77, 93, 65, 68, 69, 89, 92]
+TRIG_DER = [173, 189, 165, 181, 161, 164, 185, 188, 169, 172, 177, 180, 141, 137, 140, 145, 148, 149, 129, 132, 133, 153, 156, 157]
+
+# Matplotlib backend setup
+try:
+    current_backend = plt.get_backend().lower()
+    if current_backend not in ("qtagg", "qt5agg"):
+        for candidate in ("QtAgg", "Qt5Agg"):
+            try:
+                plt.switch_backend(candidate)
+                break
+            except Exception:
+                continue
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------
+# FUNCTIONS
+# ---------------------------------------------------------------------
+
+def save_selection_plot(t_ms, y_izq, y_der, start_ms, end_ms, run_name):
+    """Saves a plot with English labels and shaded artifact area."""
+    plt.ioff()
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    if y_izq is not None:
+        ax.plot(t_ms, y_izq, lw=1.5, color='royalblue', label="Left Stimulation")
+    if y_der is not None:
+        ax.plot(t_ms, y_der, lw=1.5, color='seagreen', label="Right Stimulation", alpha=0.8)
+    
+    # Artifact window shading
+    ax.axvspan(start_ms, end_ms, color='red', alpha=0.2, label='Artifact Window')
+    ax.axvline(0, color="black", ls="--", lw=1, label="Stimulus Onset")
+    
+    ax.set_title(f"Cervical ESG Stimulation Artifact - {run_name}")
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Amplitude (µV)")
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.2)
+    
+    # Save image
+    fig_path = SUBJECT_DIR / f"artifact_ESG_{run_name.replace('.vhdr', '')}.png"
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  -> Image saved: {fig_path.name}")
+
+def ginput_two_points_plot(t_ms, y_izq, y_der, subject_label):
+    """Interactive plot for manual window selection."""
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if y_izq is not None:
+        ax.plot(t_ms, y_izq, lw=1, color='blue', label="Left ESG Avg")
+    if y_der is not None:
+        ax.plot(t_ms, y_der, lw=1, color='green', label="Right ESG Avg", alpha=0.7)
+        
+    ax.axvline(0, color="r", ls="--", label="Stimulus Onset")
+    ax.set_title(f"{subject_label} — Click START and END of artifact")
+    ax.set_xlabel("Time (ms)")
+    ax.set_ylabel("Amplitude (µV)")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.show()
+
+    try:
+        pts = plt.ginput(2, timeout=-1)
+    except Exception:
+        pts = plt.ginput(2, timeout=0)
+
+    plt.close(fig)
+    if not pts or len(pts) < 2:
+        return None, None
+    xs = sorted(p[0] for p in pts)
+    return xs[0], xs[1]
+
+# ---------------------------------------------------------------------
+# MAIN PROCESS
+# ---------------------------------------------------------------------
+
+def main():
+    if not SUBJECT_DIR.exists():
+        print(f"Folder not found: {SUBJECT_DIR}")
+        sys.exit(1)
+
+    # Filter Run files (exclude Rest)
+    vhdr_files = sorted([f for f in SUBJECT_DIR.glob("*.vhdr") if "Run" in f.name and "Rest" not in f.name])
+    
+    if not vhdr_files:
+        print("No Run files found.")
+        return
+
+    rows = []
+    for vhdr in vhdr_files:
+        print(f"\nProcessing ESG: {vhdr.name}")
+        raw = mne.io.read_raw_brainvision(vhdr, preload=True, verbose=False)
+        events, event_id = mne.events_from_annotations(raw, verbose=False)
+        
+        # Check for ESG channels
+        present_esg = [ch for ch in ESG_CERV if ch in raw.ch_names]
+        if not present_esg:
+            print(f"  -> No ESG channels found in {vhdr.name}. Skipping.")
+            continue
+
+        sf = raw.info["sfreq"]
+        s0, s1 = int(round(EPOCH_VIEW_MS[0]/1000*sf)), int(round(EPOCH_VIEW_MS[1]/1000*sf))
+        win_len = s1 - s0 + 1
+        t_ms = np.arange(win_len) / sf * 1000 + EPOCH_VIEW_MS[0]
+
+        def get_avg(trigger_list):
+            # Flexible trigger search (detects 'S73' or 'S 73')
+            valid_names = []
+            for t in trigger_list:
+                m1, m2 = f"Stimulus/S{t}", f"Stimulus/S {t}"
+                if m1 in event_id: valid_names.append(m1)
+                if m2 in event_id: valid_names.append(m2)
+            
+            if not valid_names: return None
+            codes = [event_id[name] for name in valid_names]
+            stim_evs = events[np.isin(events[:, 2], codes)]
+            
+            avg_sum = np.zeros(win_len)
+            count = 0
+            for ev in stim_evs[:, 0]:
+                i0, i1 = ev + s0, ev + s1
+                if 0 <= i0 and i1 < raw.n_times:
+                    # Average across selected ESG channels
+                    seg = raw.get_data(picks=present_esg, start=i0, stop=i1+1)
+                    avg_sum += seg.mean(axis=0) * 1e6
+                    count += 1
+            return avg_sum / count if count > 0 else None
+
+        y_izq = get_avg(TRIG_IZQ)
+        y_der = get_avg(TRIG_DER)
+
+        if y_izq is None and y_der is None:
+            print("  -> No triggers found for these lists.")
+            continue
+
+        start_ms, end_ms = ginput_two_points_plot(t_ms, y_izq, y_der, vhdr.name)
+        
+        if start_ms is not None:
+            rows.append({
+                "run": vhdr.name, 
+                "start_ms": start_ms, 
+                "end_ms": end_ms
+            })
+            # Save English version for presentation
+            save_selection_plot(t_ms, y_izq, y_der, start_ms, end_ms, vhdr.name)
+
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(OUT_CSV, index=False, float_format="%.6f")
+        print(f"\nESG results saved to: {OUT_CSV}")
+
+if __name__ == "__main__":
+    main()
