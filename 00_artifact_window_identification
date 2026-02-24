@@ -3,10 +3,8 @@
 Created on Tue Feb 3 15:26:39 2026
 @author: navar
 
-Interactive selection of artifact window for Cervical ESG.
-- Uses ESG channels for averaging.
-- Manual selection per Run (8 runs).
--  results export in csv
+Interactive selection of artifact window for Cervical ESG, manual selection per run (8 runs), what it shows is the average of the stimulation artifact per run.
+Results export in csv,
 """
 
 from pathlib import Path
@@ -17,13 +15,11 @@ import matplotlib.pyplot as plt
 import mne
 import glob
 
-# ---------------------------------------------------------------------
-# CONFIGURATION
-# ---------------------------------------------------------------------
+# Configuration
 SUBJECT_DIR = Path(r"C:\Users\navar\Desktop\eeg\eeg")
 OUT_CSV = SUBJECT_DIR / "tiempos_artefacto_ESG_MULTICONS.csv"
 
-# ESG cervical channels (RESTORED)
+# ESG cervical channels (here I don't put ERB or AXILLA, and neither TH6 or AC, but I do put them in the interpolation script
 ESG_CERV = [
     "Iz", "SC1", "S3", "S4", "S5", "S6", "S7", "S8", "S9",
     "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19",
@@ -50,9 +46,7 @@ try:
 except Exception:
     pass
 
-# ---------------------------------------------------------------------
-# FUNCTIONS
-# ---------------------------------------------------------------------
+# Functions
 
 def save_selection_plot(t_ms, y_izq, y_der, start_ms, end_ms, run_name):
     """Saves a plot with English labels and shaded artifact area."""
@@ -108,9 +102,7 @@ def ginput_two_points_plot(t_ms, y_izq, y_der, subject_label):
     xs = sorted(p[0] for p in pts)
     return xs[0], xs[1]
 
-# ---------------------------------------------------------------------
-# MAIN PROCESS
-# ---------------------------------------------------------------------
+# Main process
 
 def main():
     if not SUBJECT_DIR.exists():
