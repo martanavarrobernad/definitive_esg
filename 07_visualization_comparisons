@@ -1,71 +1,82 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Feb 19 11:47:13 2026
-
-@author: marta.navarrobernad
-"""
-
 import mne
 import os
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
-# --- CONFIGURACIÓN DE RUTAS ---
-BASE_PATH = "/home/marta.navarrobernad/Desktop/sub-P02/eeg/AVERAGES_DEF/averages_TH6"
-FILTROS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
-ESTADO = "INATENTO"
-TIPOS = ["LOCAL", "GLOBAL"]
+# Config
+# The script looks for the 'averages_TH6' folder in the current working directory
+REFERENCE = "TH6"
+BASE_PATH = os.path.abspath(f"averages_{REFERENCE}")
 
-# Colores fijos para máxima claridad
-COLOR_STD = "#0000FF" # Azul puro
-COLOR_DEV = "#FF0000" # Rojo puro
+print(f"DEBUG: Searching for averages in: {BASE_PATH}")
 
-def generar_comparativa_bi_color(tipo_referencia):
-    tmin_plot, tmax_plot = -0.010, 0.030
-    fig, axes = plt.subplots(len(FILTROS), 1, figsize=(12, 22), sharex=True)
+FILTERS = ["Nierula_Std", "Nierula_Late", "Gabrieli", "Nierula_Otro", "Mehra", "Wimmer", "Boehme"]
+STATE = "ATENTO" #can also put INATENTO for inattentive
+SPINAL_CH_LIST = ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]
+
+# Fixed colors for maximum clarity
+COLOR_STD = "#0000FF" # Blue
+COLOR_DEV = "#FF0000" # Red
+
+def generate_bicolor_comparison(condition_type):
+    # Time window for Spinal SEP (N22/P25) in seconds
+    tmin_plot, tmax_plot = -0.010, 0.050 
+    fig, axes = plt.subplots(len(FILTERS), 1, figsize=(12, 22), sharex=True)
     
-    for i, filtro in enumerate(FILTROS):
-        file_path = os.path.join(BASE_PATH, ESTADO, tipo_referencia, f"Avg_{filtro}_TH6_{ESTADO}_{tipo_referencia}-ave.fif")
+    for i, filter_name in enumerate(FILTERS):
+        # Path based on the hierarchy created by the averaging script
+        file_name = f"Avg_{filter_name}_{REFERENCE}_{STATE}_{condition_type}-ave.fif"
+        file_path = os.path.join(BASE_PATH, STATE, condition_type, file_name)
         
         if not os.path.exists(file_path):
-            axes[i].text(0.5, 0.5, f"No encontrado: {filtro}", ha='center')
+            print(f"[-] ERROR: File not found at {file_path}")
+            axes[i].text(0.5, 0.5, f"Not found:\n{file_name}", ha='center', fontsize=8)
             continue
         
+        print(f"[+] LOADED: {file_name}")
         evokeds = mne.read_evokeds(file_path, verbose=False)
+        
+        # 0: Standard, 1: Deviant 
         std = evokeds[0].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
         dev = evokeds[1].copy().crop(tmin=tmin_plot, tmax=tmax_plot)
-        times = std.times * 1000 
+        times = std.times * 1000 # Convert to ms for X-axis
 
-        # 1. Pintar todos los canales del STANDARD en AZUL
         for ch_idx, ch_name in enumerate(std.ch_names):
-            if ch_name in ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]:
-                axes[i].plot(times, std.data[ch_idx] * 1e6, 
-                             color=COLOR_STD, linestyle='--', linewidth=0.8, alpha=0.5)
+            if ch_name in SPINAL_CH_LIST:
+                # Standard: Blue dashed
+                axes[i].plot(times, std.data[ch_idx] * 1e6, color=COLOR_STD, 
+                             linestyle='--', linewidth=0.7, alpha=0.4)
+                # Deviant: Red solid
+                axes[i].plot(times, dev.data[ch_idx] * 1e6, color=COLOR_DEV, 
+                             linestyle='-', linewidth=1.2, alpha=0.7)
 
-        # 2. Pintar todos los canales del DEVIANT en ROJO
-        for ch_idx, ch_name in enumerate(dev.ch_names):
-            if ch_name in ["Iz", "SC1", "S3", "S6", "SC6", "S14", "S18", "S7", "S11", "S15", "S19", "S5", "S9", "S13", "S17", "S4", "S8", "S12", "S16"]:
-                axes[i].plot(times, dev.data[ch_idx] * 1e6, 
-                             color=COLOR_DEV, linestyle='-', linewidth=1.5, alpha=0.8)
+        # Subplot Aesthetics
+        axes[i].set_title(f"FILTER: {filter_name.upper()} | {condition_type}", 
+                          loc='left', fontweight='bold', fontsize=10)
+        axes[i].axvline(0, color='black', linewidth=1) 
+        
+        # AUTOMATIC Y-AXIS SCALE
+        axes[i].autoscale(enable=True, axis='y', tight=False)
+        axes[i].set_ylabel("Amplitude (µV)")
+        axes[i].grid(True, alpha=0.2)
 
-        # Estética
-        axes[i].set_title(f"FILTRO: {filtro.upper()}", loc='left', fontweight='bold', fontsize=10)
-        axes[i].axvline(0, color='black', linestyle='-', linewidth=1) 
-        axes[i].set_ylabel("µV")
+    # Global Legend
+    custom_lines = [Line2D([0], [0], color=COLOR_STD, linestyle='--', lw=1.5),
+                    Line2D([0], [0], color=COLOR_DEV, linestyle='-', lw=1.5)]
+    axes[0].legend(custom_lines, ['Standard', 'Deviant'], loc='upper right', frameon=True)
 
-    # Leyenda solo en el primer gráfico para no saturar
-    from matplotlib.lines import Line2D
-    custom_lines = [Line2D([0], [0], color=COLOR_STD, linestyle='--'),
-                    Line2D([0], [0], color=COLOR_DEV, linestyle='-')]
-    axes[0].legend(custom_lines, ['Standard (Azul)', 'Deviant (Rojo)'], loc='upper right')
-
-    axes[-1].set_xlabel("Tiempo (ms)")
+    axes[-1].set_xlabel("Time (ms)")
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-    plt.suptitle(f"COMPARATIVA {tipo_referencia} - AZUL (STD) vs ROJO (DEV)", fontsize=14, fontweight='bold')
+    
+    # Main Title
+    plt.suptitle(f"REF {REFERENCE}: {STATE} - {condition_type} COMPARISON (AUTO Y-AXIS)", 
+                 fontsize=16, fontweight='bold')
     
     return fig
 
 if __name__ == "__main__":
-    fig_l = generar_comparativa_bi_color("LOCAL")
-    fig_g = generar_comparativa_bi_color("GLOBAL")
+    # Generate both Local and Global comparisons
+    fig_l = generate_bicolor_comparison("LOCAL")
+    fig_g = generate_bicolor_comparison("GLOBAL")
+    
     plt.show()
