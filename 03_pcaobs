@@ -16,10 +16,9 @@ Created on Mon Feb 16 12:06:38 2026
 
 # -*- coding: utf-8 -*-
 """
-PASO 3: CORRECCIÓN CARDÍACA (PCA-OBS) - SPYDER LINUX
-- Detecta R-peaks en el canal ECG.
-- Aplica PCA-OBS (4 componentes) sobre la señal de 10k Hz.
-- NO aplica filtros todavía (para que el benchmark posterior sea limpio).
+(PCA-OBS)
+- Detect R-peaks in ECG channel
+- PCA-OBS (4 components) over 10k Hz signal
 """
 
 from pathlib import Path
@@ -78,7 +77,7 @@ def main():
             # Get indices for requested channels
             picks = [raw.ch_names.index(ch) for ch in CHANNELS_TO_CLEAN if ch in raw.ch_names]
             
-            print("  -> Aplicando limpieza PCA-OBS (4 componentes)...")
+            print("  -> Apliying PCA-OBS ...")
             raw_obs = apply_pca_obs(
                 raw,
                 qrs_times=qrs_times,
