@@ -19,8 +19,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import PchipInterpolator
 import gc  # Garbage collector para liberar RAM
 
-# configuracion, los tiemps de artefacto de esg ya estaban calculados para el preprocesamiento de eeg, que ya se calculaba con los canales espinales
-# por tanto, cogemos el mismo csv
+# take the artifact timing csv
 SUBJECT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg")
 CFG_WIN_CSV = SUBJECT_DIR / "tiempos_artefacto_ESG_MULTICONS.csv"
 
