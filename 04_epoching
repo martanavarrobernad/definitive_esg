@@ -5,12 +5,12 @@ import os
 import numpy as np
 from pathlib import Path
 
-# CONFIGURACIÓN
+# config
 INPUT_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/ESG_CLEAN_OBS")
 EPOCHS_STAGE_DIR = Path("/home/marta.navarrobernad/Desktop/sub-P02/eeg/EPOCHS_STAGING")
 EPOCHS_STAGE_DIR.mkdir(exist_ok=True, parents=True)
 
-# --- ETIQUETADO JERÁRQUICO MAESTRO ---
+# triggers
 EVENT_ID = {
     'Attentive/LS/GS': 10, 'Attentive/LS/GD': 11, 
     'Attentive/LD/GS': 12, 'Attentive/LD/GD': 13,
@@ -42,18 +42,17 @@ def main():
         
         events, ev_id = mne.events_from_annotations(raw, verbose=False)
         
-        # 1. Mapeo inverso de anotaciones para saber qué número corresponde a qué valor interno
-        # ev_id tiene {'Stimulus/S 69': 1, ...}
+        # 1. Trigger mapping
         val_to_trigger = {}
         for annot, val in ev_id.items():
             num_str = "".join(filter(str.isdigit, annot))
             if num_str:
                 val_to_trigger[val] = int(num_str)
 
-        # 2. CREACIÓN DE NUEVOS EVENTOS (Adjudicación de IDs del 10 al 23)
+        # 2. New events
         # Filtramos habituación y transformamos IDs simultáneamente
         clean_events = []
-        # Empezamos después de los 75 de habituación
+        # Take 75 of habituation away
         events_no_hab = events[75:] 
 
         for ev in events_no_hab:
@@ -67,25 +66,25 @@ def main():
                     clean_events.append([ev[0], 0, new_id])
 
         if not clean_events:
-            print(f"  ERROR: No se generaron eventos válidos para este archivo.")
+            print(f"  ERROR")
             continue
 
         new_events_array = np.array(clean_events)
 
-        # 3. CREAR ÉPOCAS
+        # 3. Create epochs
         # Ahora usamos EVENT_ID (el maestro) y new_events_array (que ya tiene los 10, 11...)
         epochs = mne.Epochs(raw, new_events_array, event_id=EVENT_ID, 
                             tmin=-0.8, tmax=0.8, 
                             baseline=(-0.8, 0.0), 
                             preload=True, verbose=False,
-                            on_missing='ignore') # Ignora si en un Run falta una condición
+                            on_missing='ignore') 
         
-        # 4. Guardar
+        # 4. Save
         out_name = f_path.stem + "-epo.fif"
         save_path = EPOCHS_STAGE_DIR / out_name
         epochs.save(save_path, overwrite=True, verbose=False)
         
-        print(f" GUARDADO EXITOSO")
+        print(f" Saved ")
         print(f" ÉPOCAS GENERADAS: {len(epochs)}")
 
 if __name__ == "__main__":
