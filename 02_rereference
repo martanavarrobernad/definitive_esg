@@ -8,9 +8,8 @@ Created on Thu Feb 19 13:36:56 2026
 
 # -*- coding: utf-8 -*-
 """
-STEP 2: DOUBLE RE-REFERENCING (TH6 and AC) + BIPOLAR ERB/AXILLA
-- Maintains original structure and CHANNELS_OF_INTEREST.
-- Adds bipolar calculation for Erb and Axilla prior to global re-referencing.
+STEP 2: DOUBLE RE-REFERENCING (TH6 and AC)
+- bipolar calculation for Erb and Axilla prior to global re-referencing.
 """
 
 from pathlib import Path
