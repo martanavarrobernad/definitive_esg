@@ -8,9 +8,7 @@ Created on Mon Feb 16 11:29:52 2026
 
 # -*- coding: utf-8 -*-
 """
-Optimized PCHIP Interpolation (Memory Efficient)
-- Uses float32 to reduce RAM usage by 50%.
-- Explicit memory clearing after each run.
+PCHIP Interpolation
 """
 
 from pathlib import Path
